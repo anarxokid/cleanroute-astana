@@ -503,7 +503,7 @@ def closing_slide():
 SEGMENTS = [
     {"id": "s1", "build": title_slide, "lead": 0.6, "tail": 0.6, "hold": 0.5, "terminal": False,
      "text": "CleanRoute Astana: a mini air-quality adviser that decides when to leave and which way to walk. "
-             "Final project for AI Fundamentals, by Ibragim Mukash."},
+             "Final project for AI Fundamentals, by Ibrageem Mukash."},
     {"id": "s2", "build": problem_slide, "lead": 0.35, "tail": 0.5, "hold": 0.0, "terminal": False,
      "text": "On a winter evening in Astana, a temperature inversion traps particulate matter near the ground. "
              "Air quality changes hour to hour and block to block, so a city-wide AQI cannot answer the two questions "
@@ -543,12 +543,27 @@ def run(cmd):
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+async def synth_text(text, path):
+    for attempt in range(5):
+        try:
+            await edge_tts.Communicate(text, VOICE, rate=RATE).save(path)
+            if os.path.getsize(path) > 0:
+                return
+        except Exception:
+            pass
+        if os.path.exists(path):
+            os.remove(path)
+        await asyncio.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"TTS returned no audio for {path}")
+
+
 async def synth_all():
     os.makedirs(VOICE_DIR, exist_ok=True)
     for seg in SEGMENTS:
         mp3 = os.path.join(VOICE_DIR, seg["id"] + ".mp3")
-        if not os.path.exists(mp3):
-            await edge_tts.Communicate(seg["text"], VOICE, rate=RATE).save(mp3)
+        if os.path.exists(mp3) and os.path.getsize(mp3) > 0:
+            continue
+        await synth_text(seg["text"], mp3)
 
 
 def decode_all():
