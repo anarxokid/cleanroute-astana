@@ -1,0 +1,8 @@
+# CleanRoute Astana — Final Project dependencies
+# The four algorithms (bayes, search, mdp, hmm) use only the Python standard
+# library (fractions, heapq, dataclasses). The packages below are needed for
+# the figures, the notebook and the test suite.
+matplotlib>=3.8
+numpy>=1.26
+pandas>=2.0
+pytest>=8.0

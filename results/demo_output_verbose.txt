@@ -1,0 +1,538 @@
+==============================================================================
+  CleanRoute Astana - a mini air-quality adviser for outdoor travel
+  Final Project, AI Fundamentals
+==============================================================================
+  Student  : Ibragim Mukash
+  Course   : AI Fundamentals, Final Project
+  Version  : 1.1.0
+
+  REAL-WORLD PROBLEM
+    On a winter evening in Astana, in the coal-heating season, a
+    temperature inversion can trap particulates near the ground, so
+    the air quality changes within an hour and differs from block to
+    block. A resident has to decide two things: leave now or wait,
+    and, if leaving, which way to walk.
+    A city-wide AQI number answers neither question.
+
+  SOLUTION - one pipeline, four course algorithms
+    [1] Bayesian inference  (Module 6)  noisy sensor reading -> belief
+    [2] A* search           (Modules 2-4) map -> minimum-exposure route
+    [3] MDP                 (Module 5)  belief + route dose -> action
+    [4] HMM / Viterbi       (Module 7)  reading sequence -> better belief
+
+  ASSUMPTIONS (all inputs are hypothetical, as the guidelines allow)
+    hidden states          A = Acceptable (PM2.5 <= 50 ug/m3)
+                           H = Hazardous (PM2.5 > 100 ug/m3)
+    prior                  P(H) = 3/10 = 30.0%
+    home sensor            P(alarm|H) = 17/20 = 85%, P(alarm|A) = 1/5 = 20%
+    air-quality chain      P(A->A) = 0.7, P(H->H) = 0.6 per hour
+    reward model           R(s,Go) = 12 - 0.02 x C(s) x W(route),
+                           C(A) = 15 and C(H) = 75 ug/m3 per weight unit,
+                           W(route) = sum of the block weights on the route
+    waiting cost           R(A,Wait) = -4, R(H,Wait) = -6 utility points
+    discount               gamma = 0.9 per hour
+    map                    6x6 blocks, weights 1..5, S = (5, 2), G = (0, 5)
+    No real dataset and no trained model are used.
+
+==============================================================================
+  PART 1 - BAYESIAN INFERENCE  (Module 6 - Probability and Bayesian Networks)
+==============================================================================
+  Subproblem: a cheap home PM2.5 sensor is noisy. One raw reading
+  cannot drive a decision, so it has to be combined with a prior.
+
+--- Case 1 - the sensor reports 'alarm' --------------------------------------
+INPUT
+  prior            P(H) = 3/10 = 0.3000
+                   P(A) = 1 - 3/10 = 7/10 = 0.7000
+  sensor model     P(alarm | H) = 17/20 = 0.8500
+                   P(alarm | A) = 1/5 = 0.2000
+  observation      e = 'alarm'
+
+KEY CALCULATION
+  joint (numerator)
+    P(e, H) = P(e | H) x P(H) = 17/20 x 3/10 = 51/200 = 0.255000
+    P(e, A) = P(e | A) x P(A) = 1/5 x 7/10 = 7/50 = 0.140000
+  evidence (law of total probability)
+    P(e) = 51/200 + 7/50 = 79/200 = 0.395000
+  posterior (normalised joint)
+    P(H | e) = 51/200 / 79/200 = 51/79 = 0.6456 = 64.6%
+    P(A | e) = 7/50 / 79/200 = 28/79 = 0.3544 = 35.4%
+  consistency check
+    P(H | e) + P(A | e) = 1
+
+OUTPUT
+  belief after one reading: P(H) = 51/79 = 64.6%, P(A) = 28/79 = 35.4%
+
+  EXPLANATION: Bayes' theorem raised P(hazardous air) from 30.0% to 64.6% using one noisy sensor reading, so the decision model starts from a calibrated belief instead of a raw signal.
+
+--- Case 2 - the sensor reports 'calm' (the same model, other evidence) ------
+  INPUT
+    prior P(H) = 3/10, observation e = 'calm'
+  KEY CALCULATION
+    P(calm|H) = 1 - 17/20 = 3/20 = 0.15
+    P(calm|A) = 1 - 1/5 = 4/5 = 0.80
+    P(H|calm) = (3/20 x 3/10) / (9/200 + 14/25)
+  OUTPUT
+    P(H | calm) = 9/121 = 0.0744 = 7.4%
+
+  The same reading moves P(H) in opposite directions: 'alarm' raises it to
+  64.6%, 'calm' lowers it to 7.4%.
+  Likelihood ratio P(alarm|H)/P(alarm|A) = 17/4 = 4.25, so one alarm multiplies the
+  odds of hazardous air by 4.25.
+
+==============================================================================
+  PART 2 - A* SEARCH  (Modules 2-4 - Problem solving and search)
+==============================================================================
+  Subproblem: if the resident leaves, which route minimises the inhaled
+  dose? Each block carries a relative PM2.5 weight; the cost of a route
+  is the sum of the weights of the blocks it passes through.
+
+
+--- The map ------------------------------------------------------------------
+           col 0   col 1   col 2   col 3   col 4   col 5
+row 0         1       1       1       1       1       G
+row 1         1       #       #       4       4       4
+row 2         1       #       #       4       5       4
+row 3         1       1       1       4       5       4
+row 4         #       #       1       4       5       4
+row 5         #       #       S       4       4       4
+
+  legend:  S = home, G = university, # = impassable (fenced depot,
+           closed courtyards), 1..5 = relative PM2.5 weight of the block
+           (1 = park, 5 = busy avenue), [x] = cell on the drawn route
+
+--- Algorithm 2a - BFS: the fewest steps -------------------------------------
+  INPUT      S = (5,2), G = (0,5), every step costs 1
+  STEPS      27 nodes expanded, 76 neighbours generated
+  expand #1   (5, 2)  g(steps) = 0
+  expand #2   (4, 2)  g(steps) = 1
+  expand #3   (5, 3)  g(steps) = 1
+  expand #4   (3, 2)  g(steps) = 2
+  expand #5   (4, 3)  g(steps) = 2
+  expand #6   (5, 4)  g(steps) = 2
+  expand #7   (3, 3)  g(steps) = 3
+  expand #8   (3, 1)  g(steps) = 3
+  expand #9   (4, 4)  g(steps) = 3
+  expand #10  (5, 5)  g(steps) = 3
+  expand #11  (2, 3)  g(steps) = 4
+  expand #12  (3, 4)  g(steps) = 4
+  expand #13  (3, 0)  g(steps) = 4
+  expand #14  (4, 5)  g(steps) = 4
+  expand #15  (1, 3)  g(steps) = 5
+  expand #16  (2, 4)  g(steps) = 5
+  expand #17  (3, 5)  g(steps) = 5
+  expand #18  (2, 0)  g(steps) = 5
+  expand #19  (0, 3)  g(steps) = 6
+  expand #20  (1, 4)  g(steps) = 6
+  expand #21  (2, 5)  g(steps) = 6
+  expand #22  (1, 0)  g(steps) = 6
+  expand #23  (0, 4)  g(steps) = 7
+  expand #24  (0, 2)  g(steps) = 7
+  expand #25  (1, 5)  g(steps) = 7
+  expand #26  (0, 0)  g(steps) = 7
+  expand #27  (0, 5)  g(steps) = 8
+  OUTPUT     8 steps, route weight 19
+           col 0   col 1   col 2   col 3   col 4   col 5
+row 0         1       1       1     [1]     [1]     [G]
+row 1         1       #       #     [4]       4       4
+row 2         1       #       #     [4]       5       4
+row 3         1       1     [1]     [4]       5       4
+row 4         #       #     [1]       4       5       4
+row 5         #       #     [S]       4       4       4
+
+  legend:  S = home, G = university, # = impassable (fenced depot,
+           closed courtyards), 1..5 = relative PM2.5 weight of the block
+           (1 = park, 5 = busy avenue), [x] = cell on the drawn route
+  route      (5, 2) -> (4, 2) -> (3, 2) -> (3, 3) -> (2, 3) -> (1, 3) -> (0, 3) -> (0, 4) -> (0, 5)
+  weights    2 + 1 + 1 + 4 + 4 + 4 + 1 + 1 + 1 = 19
+
+  EXPLANATION: BFS expands level by level, so the first time it reaches the
+  goal it holds a route with the fewest steps - but it is blind to pollution,
+  and this 8-step route crosses 3
+  weight-4 avenue blocks, for a total dose of 19 weight units.
+
+--- Algorithm 2b - UCS (Dijkstra): the minimum exposure ----------------------
+  INPUT      cost of entering a block = its PM2.5 weight
+  STEPS      21 nodes expanded, 55 neighbours generated
+  expand #1   (5, 2)  w = 2  g = 2
+  expand #2   (4, 2)  w = 1  g = 3
+  expand #3   (3, 2)  w = 1  g = 4
+  expand #4   (3, 1)  w = 1  g = 5
+  expand #5   (5, 3)  w = 4  g = 6
+  expand #6   (3, 0)  w = 1  g = 6
+  expand #7   (4, 3)  w = 4  g = 7
+  expand #8   (2, 0)  w = 1  g = 7
+  expand #9   (3, 3)  w = 4  g = 8
+  expand #10  (1, 0)  w = 1  g = 8
+  expand #11  (0, 0)  w = 1  g = 9
+  expand #12  (5, 4)  w = 4  g = 10
+  expand #13  (0, 1)  w = 1  g = 10
+  expand #14  (0, 2)  w = 1  g = 11
+  expand #15  (4, 4)  w = 5  g = 12
+  expand #16  (2, 3)  w = 4  g = 12
+  expand #17  (0, 3)  w = 1  g = 12
+  expand #18  (3, 4)  w = 5  g = 13
+  expand #19  (0, 4)  w = 1  g = 13
+  expand #20  (5, 5)  w = 4  g = 14
+  expand #21  (0, 5)  w = 1  g = 14
+  OUTPUT     12 steps, route weight 14, optimal cost 14
+
+  EXPLANATION: UCS always expands the cheapest frontier node, so it is
+  optimal for any non-negative cost - but with no heuristic it spreads in
+  every direction and wastes expansions.
+
+--- Algorithm 2c - A*: the minimum exposure, with a heuristic ----------------
+  INPUT      g = exposure weight so far
+             h = manhattan(n, G) x min cell weight = manhattan(n, G) x 1
+             f = g + h
+  STEPS      16 nodes expanded, 39 neighbours generated
+  expand #1   (5, 2)  w = 2  g = 2   h = 8   f = 10
+  expand #2   (4, 2)  w = 1  g = 3   h = 7   f = 10
+  expand #3   (3, 2)  w = 1  g = 4   h = 6   f = 10
+  expand #4   (3, 1)  w = 1  g = 5   h = 7   f = 12
+  expand #5   (3, 3)  w = 4  g = 8   h = 5   f = 13
+  expand #6   (4, 3)  w = 4  g = 7   h = 6   f = 13
+  expand #7   (5, 3)  w = 4  g = 6   h = 7   f = 13
+  expand #8   (3, 0)  w = 1  g = 6   h = 8   f = 14
+  expand #9   (2, 0)  w = 1  g = 7   h = 7   f = 14
+  expand #10  (1, 0)  w = 1  g = 8   h = 6   f = 14
+  expand #11  (0, 0)  w = 1  g = 9   h = 5   f = 14
+  expand #12  (0, 1)  w = 1  g = 10  h = 4   f = 14
+  expand #13  (0, 2)  w = 1  g = 11  h = 3   f = 14
+  expand #14  (0, 3)  w = 1  g = 12  h = 2   f = 14
+  expand #15  (0, 4)  w = 1  g = 13  h = 1   f = 14
+  expand #16  (0, 5)  w = 1  g = 14  h = 0   f = 14
+  OUTPUT     12 steps, route weight 14, optimal cost 14
+           col 0   col 1   col 2   col 3   col 4   col 5
+row 0       [1]     [1]     [1]     [1]     [1]     [G]
+row 1       [1]       #       #       4       4       4
+row 2       [1]       #       #       4       5       4
+row 3       [1]     [1]     [1]       4       5       4
+row 4         #       #     [1]       4       5       4
+row 5         #       #     [S]       4       4       4
+
+  legend:  S = home, G = university, # = impassable (fenced depot,
+           closed courtyards), 1..5 = relative PM2.5 weight of the block
+           (1 = park, 5 = busy avenue), [x] = cell on the drawn route
+  route      (5, 2) -> (4, 2) -> (3, 2) -> (3, 1) -> (3, 0) -> (2, 0) -> (1, 0) -> (0, 0) -> (0, 1) -> (0, 2) -> (0, 3) -> (0, 4) -> (0, 5)
+  weights    2 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 = 14
+
+  EXPLANATION: A* trades 4 extra steps for a route through cleaner blocks, cutting the inhaled dose from 19 to 14 weight units (-26.3%), and it reaches that optimum after expanding 16 nodes against 27 for BFS.
+
+  h is admissible (it never overestimates, because every remaining step
+  costs at least 1) and consistent, therefore A* is guaranteed to return
+  the same optimal cost as UCS - which it does, with fewer expansions.
+algorithm                          steps  exposure weight  nodes expanded  neighbours generated  optimal cost
+---------------------------------  -----  ---------------  --------------  --------------------  ------------
+BFS (fewest steps)                     8               19              27                    76           8.0
+UCS / Dijkstra (minimum exposure)     12               14              21                    55          14.0
+A* (minimum exposure)                 12               14              16                    39          14.0
+
+==============================================================================
+  PART 3 - MARKOV DECISION PROCESS  (Module 5 - MDP and Reinforcement Learning)
+==============================================================================
+  Subproblem: leave now or wait one hour? 'Go' ends the episode (the
+  resident has arrived); 'Wait' costs an hour and the air then changes
+  according to the transition matrix.
+
+  ACTIONS
+    Go    = leave now and walk for one hour
+    Wait  = stay one more hour indoors with the air purifier on
+
+--- 3a - One reading, the shortest-distance route (weight 19) ----------------
+INPUT
+  belief from Bayes   P(A) = 28/79 = 0.3544, P(H) = 51/79 = 0.6456
+  shortest-distance route weight  W = 19 block-weight units
+
+REWARD TABLE  R(state, action) = arrival benefit - dose cost x concentration x W
+  R(A, Go)   =     63/10 = +6.300      R(A, Wait) =   -4 = -4.000
+  R(H, Go)   =     -33/2 = -16.500      R(H, Wait) =   -6 = -6.000
+
+KEY CALCULATION  Q(b, a) = sum_s b(s) x R(s, a)
+  Q(b, Go  ) = 0.3544 x (+6.300) + 0.6456 x (-16.500) = -8.4190   (exact -6651/790)
+  Q(b, Wait) = 0.3544 x (-4.000) + 0.6456 x (-6.000) = -5.2911   (exact -418/79)
+
+DECISION THRESHOLD  (exact)
+  dA = R(A,Go) - R(A,Wait) = +10.300
+  dH = R(H,Go) - R(H,Wait) = -10.500
+  p* = dA / (dA - dH) = 103/208 = 0.4952 = 49.52%
+  Go now is better exactly when P(H) < p* = 49.52%
+
+OUTPUT
+  P(H) = 64.56% >= p* = 49.52% -> recommended action: Wait
+
+  EXPLANATION: The MDP turns the belief P(H) = 64.6% into an action by comparing one-step expected rewards (Go -8.42 vs Wait -5.29) against the exact threshold p* = 49.5%, which is where the health cost of the trip outweighs the cost of losing an hour.
+
+--- 3b - The same reading, the A* minimum-exposure route (weight 14) ---------
+INPUT
+  belief from Bayes   P(A) = 28/79 = 0.3544, P(H) = 51/79 = 0.6456
+  minimum-exposure route weight  W = 14 block-weight units
+
+REWARD TABLE  R(state, action) = arrival benefit - dose cost x concentration x W
+  R(A, Go)   =      39/5 = +7.800      R(A, Wait) =   -4 = -4.000
+  R(H, Go)   =        -9 = -9.000      R(H, Wait) =   -6 = -6.000
+
+KEY CALCULATION  Q(b, a) = sum_s b(s) x R(s, a)
+  Q(b, Go  ) = 0.3544 x (+7.800) + 0.6456 x (-9.000) = -3.0456   (exact -1203/395)
+  Q(b, Wait) = 0.3544 x (-4.000) + 0.6456 x (-6.000) = -5.2911   (exact -418/79)
+
+DECISION THRESHOLD  (exact)
+  dA = R(A,Go) - R(A,Wait) = +11.800
+  dH = R(H,Go) - R(H,Wait) = -3.000
+  p* = dA / (dA - dH) = 59/74 = 0.7973 = 79.73%
+  Go now is better exactly when P(H) < p* = 79.73%
+
+OUTPUT
+  P(H) = 64.56% < p* = 79.73% -> recommended action: Go
+
+  EXPLANATION: only the reward table changed - the belief is identical -
+  yet the recommendation flips, because a cleaner route lowers the health
+  cost of going out and pushes the decision threshold up from 49.5% to 79.7%.
+  This is the integration the project asks for: the search result is an
+  input to the decision model, not a separate exercise.
+
+--- 3c - Value iteration: what the route is worth in the long run ------------
+  Bellman backup, gamma = 0.9, 'Go' terminates the episode:
+    V(s) = max( R(s, Go),  R(s, Wait) + gamma x sum_s' P(s'|s) V(s') )
+
+route                 V(A)     V(H)  policy in A  policy in H  iterations
+-----------------  -------  -------  -----------  -----------  ----------
+shortest (W = 19)  +6.3000  -8.1130  Go           Wait                 36
+A* (W = 14)        +7.8000  -6.9391  Go           Wait                 35
+
+  Planning the cleaner route raises the optimal value of clean air by
+  +1.5000 (+23.8%) and of hazardous air by +1.1739.
+
+  EXPLANATION: value iteration converges to the same stationary policy in
+  both cases - go when the air is acceptable, wait when it is hazardous -
+  which confirms that the one-step comparison is not an artefact, and the
+  higher values quantify the benefit of the route.
+
+--- Convergence trace (shortest route) ---------------------------------------
+INPUT
+  discount gamma = 9/10 = 0.9
+  route weight W = 19
+  transitions P(s' | s):
+    from A: P(A|A) = 0.7, P(H|A) = 0.3
+    from H: P(A|H) = 0.4, P(H|H) = 0.6
+
+BELLMAN BACKUP  (Go terminates the episode, so it has no continuation value)
+  V(s) = max( R(s, Go),  R(s, Wait) + gamma x sum_s' P(s'|s) V(s') )
+
+KEY CALCULATION - iteration by iteration
+  k = 1: V(A) = +6.300000, V(H) = -6.000000, max change = 6.300e+00
+  k = 2: V(A) = +6.300000, V(H) = -6.972000, max change = 9.720e-01
+  k = 3: V(A) = +6.300000, V(H) = -7.496880, max change = 5.249e-01
+  k = 4: V(A) = +6.300000, V(H) = -7.780315, max change = 2.834e-01
+  k = 5: V(A) = +6.300000, V(H) = -7.933370, max change = 1.531e-01
+  k = 6: V(A) = +6.300000, V(H) = -8.016020, max change = 8.265e-02
+  k = 7: V(A) = +6.300000, V(H) = -8.060651, max change = 4.463e-02
+  k = 8: V(A) = +6.300000, V(H) = -8.084751, max change = 2.410e-02
+  ... converged at k = 36, max change = 7.746e-10 < 1.0e-09
+
+OUTPUT
+  optimal values   V(A) = +6.3000, V(H) = -8.1130
+  optimal policy   Go in Acceptable air, Wait in Hazardous air
+  iterations       36
+
+==============================================================================
+  PART 4 - HIDDEN MARKOV MODEL  (Module 7 - HMM)  [bonus, fourth algorithm]
+==============================================================================
+  Subproblem: the resident does not see one reading but three, one per
+  hour. A sequence carries more information than a single element: two
+  alarms followed by a calm reading is not the same as three alarms.
+
+  The HMM reuses the Part 1 sensor model and the Part 3 transition
+  matrix, so it is consistent with the rest of the pipeline.
+
+--- 4a - Viterbi decoding: the most likely hidden sequence -------------------
+INPUT
+  observations   ['alarm', 'alarm', 'calm']
+  initial pi     pi(A) = 0.7, pi(H) = 0.3
+  transitions    P(A->A) = 0.7, P(A->H) = 0.3
+  emissions      P(alarm|A) = 0.2, P(calm|A) = 0.8
+  transitions    P(H->A) = 0.4, P(H->H) = 0.6
+  emissions      P(alarm|H) = 0.85, P(calm|H) = 0.15
+
+KEY CALCULATION - forward pass
+  delta_t(s) = max_s' [ delta_{t-1}(s') x P(s | s') ] x P(o_t | s)
+  t = 1:  delta_1(s) = pi(s) x P(o_1 | s)
+    delta_1(A) = 0.7000 x 0.2000 = 0.140000
+    delta_1(H) = 0.3000 x 0.8500 = 0.255000
+  t = 2:  o_2 = 'alarm'
+    delta_2(A): max(0.140000 x 0.70 = 0.098000 (from A), 0.255000 x 0.40 = 0.102000 (from H))
+      -> best predecessor H, delta_2(A) = 0.02040000, psi = H
+    delta_2(H): max(0.140000 x 0.30 = 0.042000 (from A), 0.255000 x 0.60 = 0.153000 (from H))
+      -> best predecessor H, delta_2(H) = 0.13005000, psi = H
+  t = 3:  o_3 = 'calm'
+    delta_3(A): max(0.020400 x 0.70 = 0.014280 (from A), 0.130050 x 0.40 = 0.052020 (from H))
+      -> best predecessor H, delta_3(A) = 0.04161600, psi = H
+    delta_3(H): max(0.020400 x 0.30 = 0.006120 (from A), 0.130050 x 0.60 = 0.078030 (from H))
+      -> best predecessor H, delta_3(H) = 0.01170450, psi = H
+
+KEY CALCULATION - backtrace
+  t = 3: argmax_s delta_T(s) = A with 0.04161600
+  t = 3: psi_3(A) = H  ->  state at t = 2 is H
+  t = 2: psi_2(H) = H  ->  state at t = 1 is H
+
+OUTPUT
+  most likely hidden sequence: ['H', 'H', 'A']
+  joint probability of that sequence and the observations: 0.041616
+
+  EXPLANATION: Viterbi keeps only the most probable predecessor for each
+  state at each step, so one backtrace recovers the whole hidden sequence
+  instead of one state at a time.
+
+--- 4b - Forward filtering: the belief after each reading --------------------
+INPUT
+  observations   ['alarm', 'alarm', 'calm']
+
+KEY CALCULATION - forward recursion (unnormalised, then normalised)
+  alpha_t(s) = [ sum_s' alpha_{t-1}(s') x P(s | s') ] x P(o_t | s)
+  t = 1:  alpha_1(A) = 0.140000, alpha_1(H) = 0.255000, total = 0.395000
+    filtered belief: P(A) = 0.3544, P(H) = 0.6456
+  t = 2:  o_2 = 'alarm'
+    prediction  alpha~_2(A) = 0.140000 x 0.70 + 0.255000 x 0.40 = 0.200000
+    update      alpha_2(A) = 0.200000 x 0.2000 = 0.040000
+    prediction  alpha~_2(H) = 0.140000 x 0.30 + 0.255000 x 0.60 = 0.195000
+    update      alpha_2(H) = 0.195000 x 0.8500 = 0.165750
+    normalised  P(A) = 0.1944, P(H) = 0.8056
+  t = 3:  o_3 = 'calm'
+    prediction  alpha~_3(A) = 0.040000 x 0.70 + 0.165750 x 0.40 = 0.094300
+    update      alpha_3(A) = 0.094300 x 0.8000 = 0.075440
+    prediction  alpha~_3(H) = 0.040000 x 0.30 + 0.165750 x 0.60 = 0.111450
+    update      alpha_3(H) = 0.111450 x 0.1500 = 0.016717
+    normalised  P(A) = 0.8186, P(H) = 0.1814
+
+OUTPUT
+  belief after 1 reading(s): P(H) = 0.6456 = 64.6%
+  belief after 2 reading(s): P(H) = 0.8056 = 80.6%
+  belief after 3 reading(s): P(H) = 0.1814 = 18.1%
+
+readings seen                 P(A)    P(H)
+--------------------------  ------  ------
+['alarm']                   0.3544  0.6456
+['alarm', 'alarm']          0.1944  0.8056
+['alarm', 'alarm', 'calm']  0.8186  0.1814
+
+  EXPLANATION: Viterbi decodes the three readings ['alarm', 'alarm', 'calm'] into the hidden sequence ['H', 'H', 'A'], and the forward recursion shows the filtered P(H) falling to 18.1%, so the MDP can decide on evidence from the whole sequence instead of one noisy reading.
+
+  The second reading makes the air look worse (80.6%),
+  the third makes it much better (18.1%). A single-reading
+  adviser could not see either of those turns.
+
+--- 4c - Final decision with the filtered belief -----------------------------
+  shortest-distance route    W = 19  Q(Go) = +2.1640  Q(Wait) = -4.3628  p* = 0.4952  ->  Go
+  A* minimum-exposure route  W = 14  Q(Go) = +4.7525  Q(Wait) = -4.3628  p* = 0.7973  ->  Go
+
+  With three readings the recommendation is 'Go' for both routes: the
+  temporal evidence alone is strong enough, and route planning adds margin.
+
+==============================================================================
+  PART 5 - EXPERIMENTS - HOW SENSITIVE IS THE RECOMMENDATION?
+==============================================================================
+  The scenario numbers are hypothetical, so the honest question is not
+  'is the answer right' but 'which assumptions change the answer'.
+
+
+--- prior sweep: sweep of prior P(H) -----------------------------------------
+prior P(H)  P(H | alarm)  shortest route  A* route  agree?
+----------  ------------  --------------  --------  ------
+      0.05        0.1828  Go              Go        yes
+      0.10        0.3208  Go              Go        yes
+      0.15        0.4286  Go              Go        yes
+      0.20        0.5152  Wait            Go        NO
+      0.25        0.5862  Wait            Go        NO
+      0.30        0.6456  Wait            Go        NO
+      0.35        0.6959  Wait            Go        NO
+      0.40        0.7391  Wait            Go        NO
+      0.45        0.7766  Wait            Go        NO
+      0.50        0.8095  Wait            Wait      yes
+      0.55        0.8386  Wait            Wait      yes
+      0.60        0.8644  Wait            Wait      yes
+      0.65        0.8876  Wait            Wait      yes
+      0.70        0.9084  Wait            Wait      yes
+      0.75        0.9273  Wait            Wait      yes
+      0.80        0.9444  Wait            Wait      yes
+      0.85        0.9601  Wait            Wait      yes
+      0.90        0.9745  Wait            Wait      yes
+      0.95        0.9878  Wait            Wait      yes
+
+  In the prior sweep the shortest-distance route and the A* route disagree for 6 of 19 values of prior P(H) (from 0.20 to 0.45): there the shortest route says 'Wait' while the minimum-exposure route says 'Go'. Outside that band both routes agree, so the recommendation is robust to the assumption.
+
+
+--- sensor sweep: sweep of false-alarm rate P(alarm|A) -----------------------
+false-alarm rate P(alarm|A)  P(H | alarm)  shortest route  A* route  agree?
+---------------------------  ------------  --------------  --------  ------
+                       0.05        0.8793  Wait            Wait      yes
+                       0.10        0.7846  Wait            Go        NO
+                       0.15        0.7083  Wait            Go        NO
+                       0.20        0.6456  Wait            Go        NO
+                       0.25        0.5930  Wait            Go        NO
+                       0.30        0.5484  Wait            Go        NO
+                       0.35        0.5100  Wait            Go        NO
+                       0.40        0.4766  Go              Go        yes
+                       0.45        0.4474  Go              Go        yes
+                       0.50        0.4215  Go              Go        yes
+
+  In the sensor sweep the shortest-distance route and the A* route disagree for 6 of 10 values of false-alarm rate P(alarm|A) (from 0.10 to 0.35): there the shortest route says 'Wait' while the minimum-exposure route says 'Go'. Outside that band both routes agree, so the recommendation is robust to the assumption.
+
+  The scenario prior P(H) = 0.30 sits inside the disagreement band of the
+  prior sweep, which is exactly why this project is interesting: here the
+  route is not decoration, it changes the recommendation.
+
+==============================================================================
+  PART 6 - INTEGRATION AND RESULTS
+==============================================================================
+  How the four algorithms form one system:
+
+    sensor 'alarm' --[1 Bayes]--> P(H) = 64.6%
+                                     |
+    6x6 map --------[2 A*]---------+--|--> route weight W = 14 (vs 19 for BFS)
+                                     |
+                          [3 MDP]  R(s,Go) = 12 - 0.02 x C(s) x W
+                                     |
+    3 readings ----[4 HMM forward]--> P(H) = 18.1%
+                                     |
+                                     v
+                          Go now, 12 steps through the park belt
+
+
+--- Summary of results -------------------------------------------------------
+#                                         result
+----------------------------------------  ----------------------------------------------------------------------
+1. Bayes, one reading 'alarm'             P(H) = 51/79 = 64.6% (prior 30.0%)
+1b. Bayes, one reading 'calm'             P(H) = 9/121 = 7.4%
+2. BFS, fewest steps                      8 steps, exposure weight 19, 27 nodes expanded
+2b. UCS, minimum exposure                 12 steps, exposure weight 14, 21 nodes expanded
+2c. A*, minimum exposure                  12 steps, exposure weight 14, 16 nodes expanded
+2d. Dose reduction by A*                  5 weight units, -26.3%, for 4 extra steps
+3. MDP, one reading + shortest route      Q(Go) = -8.419, Q(Wait) = -5.291, p* = 49.5% -> Wait
+3b. MDP, one reading + A* route           Q(Go) = -3.046, Q(Wait) = -5.291, p* = 79.7% -> Go
+3c. Value iteration, shortest route       V(A) = +6.3000, V(H) = -8.1130, policy = Go/Wait, 36 iterations
+3d. Value iteration, A* route             V(A) = +7.8000, V(H) = -6.9391, policy = Go/Wait, 35 iterations
+4. Viterbi, three readings                ['alarm', 'alarm', 'calm'] -> hidden sequence ['H', 'H', 'A']
+4b. Forward filtering                     P(H) after 1/2/3 readings = 64.6%, 80.6%, 18.1%
+4c. MDP, three readings + shortest route  Q(Go) = +2.164, p* = 49.5% -> Go
+4d. MDP, three readings + A* route        Q(Go) = +4.752, p* = 79.7% -> Go
+FINAL RECOMMENDATION                      Go now, 12-step route through the park belt, P(H) = 18.1% < p* = 79.7%
+
+--- Answer to the resident ---------------------------------------------------
+  Recommendation : Go - leave now and walk for one hour
+  Why            : P(hazardous) = 18.1% is below the
+                   exact decision threshold p* = 79.7%
+  Route          : 12 steps, exposure weight 14
+  Hidden states  : Viterbi says the last three hours were ['H', 'H', 'A']
+  Margin         : Q(Go) - Q(Wait) = +9.115 utility points
+
+  WHAT WOULD IMPROVE THE PROJECT
+    * replace the hypothetical sensor model with a calibrated low-cost
+      sensor, and estimate its sensitivity and false-alarm rate from data;
+    * estimate the transition matrix from an hourly AQI time series
+      instead of assuming it, and learn the policy with Q-learning;
+    * model exposure per unit of effort, so a steep or longer route costs
+      more breaths per block;
+    * extend the MDP to more than two states and to a finite deadline,
+      which turns 'wait' into a genuine scheduling decision;
+    * serve the pipeline over an API so that it can be reused by other
+      courses and expanded into a larger project.

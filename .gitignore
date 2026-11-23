@@ -1,0 +1,15 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Regenerable demo intermediates (TTS narration + cached audio)
+demo/voice/
+
+# Temporary build artifacts kept locally, not part of the deliverable
+pptx_x/
+presentation/archive/
+CleanRoute_Astana_source.zip
+out.json
