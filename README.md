@@ -68,6 +68,7 @@ AI_FINAL_PROJECT/
 │   ├── experiments.py    sensitivity sweeps (which assumptions change the answer)
 │   ├── figures.py        matplotlib figures, generated from the real results
 │   ├── render.py         console tables / grids / section headers
+│   ├── interactive.py    --interactive: your own readings and route
 │   ├── cli.py            command-line entry point
 │   └── __main__.py       `python -m airoute`
 ├── tests/                26 pytest tests (also runnable standalone)
@@ -123,6 +124,7 @@ From the `src/` directory:
 ```bash
 cd src
 python -m airoute                      # full pipeline, console output
+python -m airoute --interactive        # type your own readings and route, get the recommendation
 python -m airoute --section mdp        # one part only: bayes|search|mdp|hmm|experiments|summary
 python -m airoute --verbose            # adds per-node search traces and Bellman history
 python -m airoute --json out.json      # machine-readable results

@@ -11,7 +11,7 @@ import json
 import sys
 from fractions import Fraction
 
-from airoute import __author__, __course__, __version__, bayes, hmm, mdp, pipeline, render, search
+from airoute import __author__, __course__, __version__, bayes, hmm, interactive, mdp, pipeline, render, search
 from airoute.scenario import (
     ACTION_NAMES,
     ARRIVAL_BENEFIT,
@@ -366,11 +366,15 @@ def build_parser():
                         default="all", help="run one part only (default: all)")
     parser.add_argument("--json", metavar="PATH", help="also write every result to a JSON file")
     parser.add_argument("--no-header", action="store_true", help="skip the scenario header")
+    parser.add_argument("--interactive", "-i", action="store_true",
+                        help="ask for your own readings and a route, then print the recommendation")
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.interactive:
+        return interactive.run()
     result = pipeline.run()
 
     if not args.no_header:

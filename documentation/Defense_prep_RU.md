@@ -236,7 +236,9 @@ EXPLANATION», как требует гайдлайн. Никакого ввод
 3. `python -m airoute --section experiments` — показать полосу расхождения и что
    сценарный prior 0.30 лежит внутри неё.
 4. `python -m pytest ../tests -q` — 26 passed.
-5. Открыть `assets/fig_pipeline.png` и `fig_decision_threshold.png` — визуальная
+5. `python -m airoute --interactive` — ввести свои показания (например, `alarm`,
+   затем `calm`) и выбрать маршрут: видно, как меняется рекомендация.
+6. Открыть `assets/fig_pipeline.png` и `fig_decision_threshold.png` — визуальная
    связка и пороги.
 
 ## Возможные вопросы преподавателя и ответы
