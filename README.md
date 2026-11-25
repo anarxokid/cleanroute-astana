@@ -39,7 +39,7 @@ reward is a labelled assumption, and all arithmetic is done in exact
 
 | # | Deliverable | File |
 |---|-------------|------|
-| 1 | Working application + local demo | [`src/airoute/`](src/airoute/) — `python -m airoute` from `src/` |
+| 1 | Working application + local demo | [`src/airoute/`](src/airoute/) — `python -m airoute` (console) or `python -m airoute.web` (browser UI) from `src/` |
 | 2 | Source code and documentation | this repository; [`README.md`](README.md); [`tests/test_airoute.py`](tests/test_airoute.py) |
 | 3 | Technical report (DOCX) | [`reports/Final_Project_report.docx`](reports/Final_Project_report.docx) |
 | 4 | Presentation, 7 slides (PPTX) | [`presentation/Final_Project_presentation.pptx`](presentation/Final_Project_presentation.pptx) |
@@ -69,6 +69,8 @@ AI_FINAL_PROJECT/
 │   ├── figures.py        matplotlib figures, generated from the real results
 │   ├── render.py         console tables / grids / section headers
 │   ├── interactive.py    --interactive: your own readings and route
+│   ├── web.py            local web adviser (`python -m airoute.web`)
+│   ├── web_page.html     the single page served by web.py
 │   ├── cli.py            command-line entry point
 │   └── __main__.py       `python -m airoute`
 ├── tests/                26 pytest tests (also runnable standalone)
@@ -130,7 +132,13 @@ python -m airoute --verbose            # adds per-node search traces and Bellman
 python -m airoute --json out.json      # machine-readable results
 python -m airoute.figures              # regenerate the 7 figures into ../assets
 python -m airoute.experiments          # print + save the two sensitivity sweeps
+python -m airoute.web                  # local web UI at http://127.0.0.1:8000/
 ```
+
+`python -m airoute.web` starts a standard-library HTTP server and opens the page in
+the browser (`--port`, `--no-browser` are optional). The page lets you pick 1–3 hourly
+readings and a route; every change recomputes the same pipeline through
+`/api/advise` and shows the recommendation, the 6×6 map and the belief trail.
 
 From the project root, run the tests:
 

@@ -238,7 +238,9 @@ EXPLANATION», как требует гайдлайн. Никакого ввод
 4. `python -m pytest ../tests -q` — 26 passed.
 5. `python -m airoute --interactive` — ввести свои показания (например, `alarm`,
    затем `calm`) и выбрать маршрут: видно, как меняется рекомендация.
-6. Открыть `assets/fig_pipeline.png` и `fig_decision_threshold.png` — визуальная
+6. `python -m airoute.web` — открыть страницу в браузере: карта 6×6 с маршрутом,
+   цепочка веры по показаниям и Витерби; менять показания и маршрут мышью.
+7. Открыть `assets/fig_pipeline.png` и `fig_decision_threshold.png` — визуальная
    связка и пороги.
 
 ## Возможные вопросы преподавателя и ответы
